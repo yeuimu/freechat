@@ -6,23 +6,14 @@ const router = express.Router();
 
 // 创建群聊 API
 router.post('/groups', async (req, res) => {
-    const { name, members, publicKey } = req.body;
-
-    // 验证请求数据
-    if (!name || !publicKey || !Array.isArray(members)) {
-        return res.status(400).json({ success: false, message: 'Invalid input. Name, publicKey, and members are required.' });
-    }
-
-    if (members.length > 20) {
-        return res.status(400).json({ success: false, message: 'Group members cannot exceed 20.' });
-    }
+    const { name } = req.body;
 
     try {
         // 创建群聊
         const group = new Group({
             name,
-            members,
-            publicKey,
+            members: [],
+            publicKey: null,
         });
 
         await group.save();
@@ -124,5 +115,79 @@ router.post('/groups/:id/leave', async (req, res) => {
     }
 });
 
+// 设置群密钥 API
+router.post('/groups/:id/set-key', async (req, res) => {
+    const { id } = req.params; // 群聊 ID
+    const { username, newKey } = req.body; // 当前用户和新群密钥
+
+    if (!username || !newKey) {
+        return res.status(400).json({
+            success: false,
+            message: 'Username and newKey are required.',
+        });
+    }
+
+    try {
+        // 查找群聊
+        const group = await Group.findById(id);
+
+        if (!group) {
+            return res.status(404).json({
+                success: false,
+                message: 'Group not found.',
+            });
+        }
+
+        // 验证当前用户是否是群成员
+        if (!group.members.includes(username)) {
+            return res.status(403).json({
+                success: false,
+                message: 'You are not a member of this group.',
+            });
+        }
+
+        // 查找分发密钥的消息（type: "key" 且群聊 updatedAt 之后）
+        const keyMessages = await Message.find({
+            recipient: id, // 群聊 ID
+            type: 'key',
+            createdAt: { $gte: group.updatedAt },
+        });
+
+        // 收集所有分发密钥消息的目标用户
+        const distributedMembers = keyMessages.map(msg => msg.sender);
+
+        // 检查分发密钥的目标是否包含所有群成员
+        const allMembersReceived = group.members.every(member =>
+            distributedMembers.includes(member)
+        );
+
+        if (!allMembersReceived) {
+            return res.status(400).json({
+                success: false,
+                message: 'Not all members have received the group key.',
+                missingMembers: group.members.filter(
+                    member => !distributedMembers.includes(member)
+                ),
+            });
+        }
+
+        // 更新群聊公钥并更新时间戳
+        group.publicKey = newKey;
+        group.updatedAt = new Date();
+        await group.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Group key has been successfully set.',
+            group,
+        });
+    } catch (error) {
+        console.error('Error setting group key:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error.',
+        });
+    }
+});
 
 module.exports = router;

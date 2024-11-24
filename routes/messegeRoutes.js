@@ -44,26 +44,4 @@ router.get('/', async (req, res) => {
     }
 });
 
-// 用户注销 API
-router.delete('/delete/:nickname', async (req, res) => {
-    const { nickname } = req.params;
-
-    try {
-        // 查找并删除用户
-        const user = await User.findOneAndDelete({ nickname });
-        if (!user) {
-            return res.status(404).json({ success: true, message: 'User not found' });
-        }
-
-        // 删除用户发送的所有消息
-        await Message.deleteMany({ sender: nickname });
-
-        // 响应成功
-        res.status(200).json({ success: true, message: 'User and associated messages deleted successfully' });
-    } catch (error) {
-        console.error('Error deleting user:', error.message);
-        res.status(500).json({ success: false, message: 'Internal server error' });
-    }
-});
-
 module.exports = router;

@@ -1,5 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
+const cors = require('cors');
 
 const userRoutes = require('./routes/userRoutes');
 const messageRoutes = require('./routes/messegeRoutes');
@@ -9,7 +10,6 @@ const http = require('http');
 const WebSocket = require('ws');
 const crypto = require('crypto'); // 用于签名验证
 
-const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 
 const Message = require('./models/Message');
@@ -22,6 +22,13 @@ require('dotenv').config();
 connectDB();
 
 const app = express();
+
+// 配置 CORS
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // 中间件
 app.use(bodyParser.json());
@@ -56,7 +63,7 @@ const wss = new WebSocket.Server({ server });
 const connections = new Map(); // { username: WebSocket }
 
 // 签名验证
-function verifySignature(username, signature) {
+async function verifySignature(username, signature) {
   return User.findOne({ nickname: username })
     .then(user => {
       if (!user) throw new Error('User not found');
@@ -99,12 +106,29 @@ async function isGroupPublicKeyNull(groupId) {
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', async (ws) => {
   let username = null; // 登录用户的用户名
 
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message);
+
+      // 连接初始化：验证签名
+      if (data.type === 'auth') {
+        const { username: user, signature } = data;
+        const isValid = await verifySignature(user, signature);
+        if (!isValid) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid signature' }));
+          ws.close();
+          return;
+        }
+
+        username = user;
+        connections.set(username, ws);
+        ws.send(JSON.stringify({ type: 'auth', status: 'success' }));
+        console.log(`${username} connected`);
+        return;
+      }
 
       // 消息处理
       if (data.type === 'message') {
@@ -115,7 +139,7 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        if (!['private', 'group'].includes(chatType)) {
+        if (!['private', 'group', 'key'].includes(chatType)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid chat type' }));
           return;
         }
