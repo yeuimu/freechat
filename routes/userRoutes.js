@@ -82,20 +82,46 @@ async function verifySignature(username, signature) {
     const user = await User.findOne({ nickname: username });
     if (!user) throw new Error('User not found');
 
-    const publicKey = user.publicKey;
+    const publicKey = user.publicKey; // 从数据库读取用户的公钥
     const verifier = crypto.createVerify('sha256');
     verifier.update(username);
     verifier.end();
-    return verifier.verify(publicKey, Buffer.from(signature, 'base64'));
+
+    // 使用 RSA-PSS 验证签名
+    const isVerified = verifier.verify(
+      {
+        key: publicKey,
+        padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+        saltLength: 32, // 必须和客户端配置一致
+      },
+      Buffer.from(signature, 'base64')
+    );
+
+    return isVerified;
   } catch (error) {
     throw new Error('Signature verification failed: ' + error.message);
   }
 }
+router.post('/verify', async (req, res) => {
+  const { nickname, signature } = req.body;
+  try {
+    const isValid = await verifySignature(nickname, signature);
+    if (!isValid) {
+      return res.status(403).json({ success: false, message: 'Invalid signature' });
+    }
+    res.status(200).json({ success: true, message: 'The user exists' });
+  } catch (error) {
+    console.error('Error verfying user:', error.message);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+})
 
 // 用户注销 API
 router.delete('/delete/:nickname', async (req, res) => {
   const { nickname } = req.params;
   const { signature } = req.body; // 从请求体中获取签名
+
+  console.log(`The ${nickname} is loggin out of the account`);
 
   try {
     // 验证签名
