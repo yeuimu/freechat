@@ -30,10 +30,10 @@ const logger = createLogger({
 async function verifySignature(username, signature) {
   try {
     const user = await User.findOne({ nickname: username });
-    if (!user) throw new Error('User not found');
+    if (!user) throw new Error("User not found");
 
     const publicKey = user.publicKey; // 从数据库读取用户的公钥
-    const verifier = crypto.createVerify('sha256');
+    const verifier = crypto.createVerify("sha256");
     verifier.update(username);
     verifier.end();
 
@@ -44,12 +44,12 @@ async function verifySignature(username, signature) {
         padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
         saltLength: 32, // 必须和客户端配置一致
       },
-      Buffer.from(signature, 'base64')
+      Buffer.from(signature, "base64")
     );
 
     return isVerified;
   } catch (error) {
-    throw new Error('Signature verification failed: ' + error.message);
+    throw new Error("Signature verification failed: " + error.message);
   }
 }
 
@@ -96,7 +96,7 @@ module.exports = function (server) {
     try {
       const isValid = await verifySignature(username, signature);
       if (!isValid) {
-        logger.error(`${username}' signature is valid!`)
+        logger.error(`${username}' signature is valid!`);
         return next(new Error(ErrorCodes.AUTHENTICATION_ERROR));
       }
       socket.username = username;
@@ -108,7 +108,13 @@ module.exports = function (server) {
   });
 
   io.on("connection", (socket) => {
-    logger.info(`${socket.username} connected, using ${socket.conn.transport.name} protocol`);
+    logger.info(
+      `User ${socket.username} connected with ${socket.conn.transport.name} protocol`
+    );
+
+    socket.conn.on("upgrade", (transport) => {
+      logger.info(`User ${socket.username} connection upgraded to ${transport.name}`);
+    });
 
     socket.on("message", async (data) => {
       try {
@@ -137,12 +143,13 @@ module.exports = function (server) {
           const recipientSocket = connections.get(recipient);
           if (recipientSocket) {
             recipientSocket.emit("message", {
-              chatType: "private",
+              // type: "private",
               sender: socket.username,
               content,
               id: savedMessage._id,
             });
           }
+          logger.info(`${socket.username} send to ${recipientSocket.username}: ${content}`);
         } else if (chatType === "group") {
           // 群消息
           if (await isGroupPublicKeyNull(recipient)) {

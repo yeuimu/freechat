@@ -22,9 +22,9 @@ router.delete('/:id', async (req, res) => {
 });
 
 // 获取消息
-router.get('/', async (req, res) => {
+router.post('/', async (req, res) => {
     try {
-        const { recipient, sender, afterDate, type } = req.query;
+        const { recipient, sender, afterDate, type } = req.body;
 
         if (!recipient || !sender || !afterDate) {
             return res.status(400).json({ success: false, message: 'Missing required query parameters' });
