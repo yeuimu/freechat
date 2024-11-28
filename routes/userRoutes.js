@@ -107,14 +107,20 @@ router.post('/verify', async (req, res) => {
   try {
     const isValid = await verifySignature(nickname, signature);
     if (!isValid) {
+      console.error(`Invalid signature for nickname: ${nickname}`);
       return res.status(403).json({ success: false, message: 'Invalid signature' });
     }
     res.status(200).json({ success: true, message: 'The user exists' });
   } catch (error) {
-    console.error('Error verfying user:', error.message);
+    console.error('Error verifying user:', {
+      nickname: nickname,
+      signature: signature,
+      errorMessage: error.message,
+      errorStack: error.stack
+    });
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
-})
+});
 
 // 用户注销 API
 router.delete('/delete/:nickname', async (req, res) => {
