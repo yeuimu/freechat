@@ -6,14 +6,42 @@ const Group = require("./models/Group");
 const { createLogger, format, transports } = require("winston");
 
 const connections = new Map(); // { username: socket }
+const missedMessages = []; // { username: message }
 
-// 定义错误码枚举
-const ErrorCodes = {
-  USER_NOT_FOUND: "USER_NOT_FOUND",
-  AUTHENTICATION_ERROR: "AUTHENTICATION_ERROR",
-  GROUP_NOT_FOUND: "GROUP_NOT_FOUND",
-  GROUP_PUBLIC_KEY_NULL: "GROUP_PUBLIC_KEY_NULL",
-  INVALID_CHAT_TYPE: "INVALID_CHAT_TYPE",
+// 错误码枚举
+const Errors = {
+  USER_NOT_FOUND: {
+    code: 1,
+    message: "USER_NOT_FOUND",
+  },
+  AUTHENTICATION_ERROR: {
+    code: 2,
+    message: "AUTHENTICATION_ERROR",
+  },
+  GROUP_NOT_FOUND: {
+    code: 3,
+    message: "GROUP_NOT_FOUND",
+  },
+  GROUP_PUBLIC_KEY_NULL: {
+    code: 4,
+    message: "GROUP_PUBLIC_KEY_NULL",
+  },
+  INVALID_CHAT_TYPE: {
+    code: 5,
+    message: "INVALID_CHAT_TYPE",
+  },
+};
+
+// 响应码枚举
+const Responds = {
+  MsgMissedOffline: {
+    code: 1,
+    message: "Recipient is offline, message not delivered",
+  },
+  MsgDeliveredSuccessfully: {
+    code: 2,
+    message: "Message delivered successfully",
+  },
 };
 
 // 使用更强大的日志系统
@@ -81,6 +109,41 @@ async function isGroupPublicKeyNull(groupId) {
   }
 }
 
+// 转达消息
+const deliverMessage = async (
+  recipientSocket,
+  { type, sender, content, create }
+) => {
+  const newMessage = new Message({
+    sender,
+    recipient: recipientSocket.username,
+    content,
+    type,
+    deleteAt: null,
+    createdAt: create,
+  });
+  const savedMessage = await newMessage.save();
+  const toMessage = {
+    type,
+    sender,
+    content,
+    id: savedMessage._id,
+    create: create,
+  };
+  // 私聊和密钥消息
+  if (type === "private" || type === "key") {
+    recipientSocket.emit("message", toMessage);
+  }
+  // 群消息
+  else if (type === "group") {
+    // if (await isGroupPublicKeyNull(recipient)) {
+    //   throw new Error(Errors.GROUP_PUBLIC_KEY_NULL.message);
+    // }
+    // socket.to(recipient).emit("message", toMessage);
+  }
+  return toMessage;
+};
+
 module.exports = function (server) {
   const io = new Server(server, {
     cors: {
@@ -97,77 +160,95 @@ module.exports = function (server) {
       const isValid = await verifySignature(username, signature);
       if (!isValid) {
         logger.error(`${username}' signature is valid!`);
-        return next(new Error(ErrorCodes.AUTHENTICATION_ERROR));
+        return next(new Error(Errors.AUTHENTICATION_ERROR.message));
       }
       socket.username = username;
       connections.set(username, socket);
       next();
     } catch (error) {
-      next(new Error(ErrorCodes.AUTHENTICATION_ERROR));
+      next(new Error(Errors.AUTHENTICATION_ERROR.message));
     }
   });
 
-  io.on("connection", (socket) => {
+  io.on("connection", async (socket) => {
     logger.info(
       `User ${socket.username} connected with ${socket.conn.transport.name} protocol`
     );
 
+    // 处理用户错过的消息
+    const miss = missedMessages.filter((m) => m.recipient === socket.username);
+    if (miss.length) {
+      const ms = miss.map((m) => m.message);
+      socket.emit("miss", { messages: ms });
+      for (m of ms) {
+        const { type, sender, content, create } = m;
+        await deliverMessage(socket, { type, sender, content, create });
+      }
+    }
+
+    // 用户更新到websocket
     socket.conn.on("upgrade", (transport) => {
-      logger.info(`User ${socket.username} connection upgraded to ${transport.name}`);
+      logger.info(
+        `User ${socket.username} connection upgraded to ${transport.name}`
+      );
     });
 
+    // 处理用户私聊和群聊
     socket.on("message", async (data) => {
       try {
-        const { chatType, recipient, content, deleteAt } = data;
+        const { type, recipient, content, create } = data;
 
-        if (!["private", "group", "key"].includes(chatType)) {
+        // type 是否正确
+        if (!["private", "group", "key"].includes(type)) {
           socket.emit("error", {
-            code: ErrorCodes.INVALID_CHAT_TYPE,
-            message: "Invalid chat type",
+            code: Errors.INVALID_CHAT_TYPE.code,
+            message: Errors.INVALID_CHAT_TYPE.message,
           });
+          logger.error(`${socket.username}'s chat type is invalid: ${type}`);
           return;
         }
 
-        const newMessage = new Message({
-          sender: socket.username,
-          recipient,
-          content,
-          type: chatType,
-          deleteAt: deleteAt ? new Date(deleteAt) : null,
-        });
-
-        const savedMessage = await newMessage.save();
-
-        // 私聊和密钥消息
-        if (chatType === "private" || chatType === "key") {
-          const recipientSocket = connections.get(recipient);
-          if (recipientSocket) {
-            recipientSocket.emit("message", {
-              // type: "private",
-              sender: socket.username,
-              content,
-              id: savedMessage._id,
-            });
-          }
-          logger.info(`${socket.username} send to ${recipientSocket.username}: ${content}`);
-        } else if (chatType === "group") {
-          // 群消息
-          if (await isGroupPublicKeyNull(recipient)) {
-            throw new Error(ErrorCodes.GROUP_PUBLIC_KEY_NULL);
-          }
-          socket.to(recipient).emit("message", {
-            chatType: "group",
+        const recipientSocket = connections.get(recipient);
+        // 对方在线
+        if (recipientSocket) {
+          const toMessage = await deliverMessage(recipientSocket, {
+            type,
             sender: socket.username,
             content,
-            id: savedMessage._id,
+            create,
+          });
+          // 转达消息完成后,响应客户端
+          logger.info(
+            `Message from ${socket.username} to ${recipientSocket.username}: ${content}`
+          );
+          socket.emit("respond", {
+            code: Responds.MsgDeliveredSuccessfully.code,
+            message: Responds.MsgDeliveredSuccessfully.message,
+            toMessage,
           });
         }
-
-        socket.emit("status", {
-          chatType,
-          message: "Message sent successfully",
-          id: savedMessage._id,
-        });
+        // 对方不在线,把消息丢在 missedMessages 中, 等对方上线了再处理
+        else {
+          const toMessage = {
+            type,
+            sender: socket.username,
+            content,
+            create,
+          };
+          missedMessages.push({
+            recipient,
+            message: toMessage,
+          });
+          socket.emit("respond", {
+            code: Responds.MsgMissedOffline.code,
+            message: Responds.MsgMissedOffline.message,
+            toMessage,
+          });
+          logger.info(
+            `The message to be sent to ${recipient} from ${socket.username} is failed, then stored it at buffers for it be resent`
+          );
+          return;
+        }
       } catch (error) {
         logger.error("Error handling message", {
           error: error.message,
@@ -177,13 +258,13 @@ module.exports = function (server) {
       }
     });
 
-    // 断开连接
+    // 用户断开连接
     socket.on("disconnect", () => {
       logger.info(`${socket.username} disconnected`);
       connections.delete(socket.username);
     });
 
-    // 处理群组加入
+    // 处理用户加入群聊
     socket.on("join", (groupId) => {
       socket.join(groupId);
       logger.info(`User ${socket.username} joined group ${groupId}`, {
