@@ -6,6 +6,7 @@ const http = require('http');
 const userRoutes = require('./routes/userRoutes');
 const messageRoutes = require('./routes/messegeRoutes');
 const groupRoutes = require('./routes/groupRoutes');
+const errorRoutes = require('./routes/errorRoutes');
 
 
 // 连接数据库
@@ -23,6 +24,7 @@ app.use(bodyParser.json());
 app.use('/user', userRoutes);
 app.use('/messege', messageRoutes);
 app.use('/group', groupRoutes);
+app.use(errorRoutes);
 
 // 启动 WebSocket 服务器
 const server = http.createServer(app);
