@@ -7,6 +7,7 @@ const { createLogger, format, transports } = require("winston");
 
 const connections = new Map(); // { username: socket }
 const missedMessages = []; // { username: message }
+const events = new Map(); // nicknam => [{eventName, data, sender}]
 
 // 错误码枚举
 const Errors = {
@@ -144,6 +145,15 @@ const deliverMessage = async (
   return toMessage;
 };
 
+// 添加没有处理的事件
+const addEvent = (username, data) => {
+  if (events.has(username)) {
+    events.get(username).push(data);
+  } else {
+    events.set(username, [data]);
+  }
+}
+
 module.exports = function (server) {
   const io = new Server(server, {
     cors: {
@@ -155,7 +165,7 @@ module.exports = function (server) {
 
   // 中间件进行身份验证
   io.use(async (socket, next) => {
-    const { username, signature } = socket.handshake.query;
+    const { username, signature } = socket.handshake.auth;
     try {
       const isValid = await verifySignature(username, signature);
       if (!isValid) {
@@ -176,14 +186,34 @@ module.exports = function (server) {
     );
 
     // 处理用户错过的消息
-    const miss = missedMessages.filter((m) => m.recipient === socket.username);
-    if (miss.length) {
-      const ms = miss.map((m) => m.message);
-      socket.emit("miss", { messages: ms });
-      for (m of ms) {
-        const { type, sender, content, create } = m;
-        await deliverMessage(socket, { type, sender, content, create });
-      }
+    if (events.has(socket.username)) {
+      const missedEvent = events.get(socket.username);
+      missedEvent.map((e) => {
+        const {eventName, toMessage, sender} = e;
+        switch (eventName) {
+          case 'message':
+            socket.emit(eventName, toMessage);
+            const data = {
+              code: Responds.MsgDeliveredSuccessfully.code,
+              message: Responds.MsgDeliveredSuccessfully.message,
+              toMessage,
+            };
+            if (connections.has(sender)) {
+              const recipientSocket = connections.get(sender);
+              recipientSocket.emit('respond', data);
+            } else {
+              addEvent(sender, data);
+            }
+            break;
+          case 'respond':
+            socket.emit('respond', {
+              code: Responds.MsgDeliveredSuccessfully.code,
+              message: Responds.MsgDeliveredSuccessfully.message,
+              toMessage,
+            })
+            break;
+        }
+      });
     }
 
     // 用户更新到websocket
@@ -227,7 +257,7 @@ module.exports = function (server) {
             toMessage,
           });
         }
-        // 对方不在线,把消息丢在 missedMessages 中, 等对方上线了再处理
+        // 对方不在线,把事件丢在 events 中, 等对方上线了再处理
         else {
           const toMessage = {
             type,
@@ -235,10 +265,8 @@ module.exports = function (server) {
             content,
             create,
           };
-          missedMessages.push({
-            recipient,
-            message: toMessage,
-          });
+          const data = {eventName: "message", toMessage, sender: socket.username};
+          addEvent(recipient, data);
           socket.emit("respond", {
             code: Responds.MsgMissedOffline.code,
             message: Responds.MsgMissedOffline.message,
@@ -253,6 +281,7 @@ module.exports = function (server) {
         logger.error("Error handling message", {
           error: error.message,
           userId: socket.username,
+          stack: error.stack,
         });
         socket.emit("error", { code: error.message, message: error.message });
       }
