@@ -117,7 +117,7 @@ const deliverMessage = async (
   const newMessage = new Message({
     sender,
     recipient: recipientSocket.username,
-    content,
+    content: content.cipherText,
     type,
     deleteAt: null,
     createdAt: create,
@@ -214,7 +214,7 @@ module.exports = function (server) {
           const toMessage = await deliverMessage(recipientSocket, {
             type,
             sender: socket.username,
-            content,
+            content: content,
             create,
           });
           // 转达消息完成后,响应客户端

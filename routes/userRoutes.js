@@ -224,56 +224,8 @@ router.post("/search", verifyUser, async (req, res, next) => {
   }
 });
 
-// 签名验证函数
-async function verifySignature(username, signature) {
-  try {
-    const user = await User.findOne({ nickname: username });
-    if (!user) throw new Error("User not found");
-
-    const publicKey = user.publicKey; // 从数据库读取用户的公钥
-    const verifier = crypto.createVerify("sha256");
-    verifier.update(username);
-    verifier.end();
-
-    // 使用 RSA-PSS 验证签名
-    const isVerified = verifier.verify(
-      {
-        key: publicKey,
-        padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
-        saltLength: 32, // 必须和客户端配置一致
-      },
-      Buffer.from(signature, "base64")
-    );
-
-    return isVerified;
-  } catch (error) {
-    throw new Error("Signature verification failed: " + error.message);
-  }
-}
-router.post("/verify", async (req, res) => {
-  const { nickname, signature } = req.body;
-  try {
-    const isValid = await verifySignature(nickname, signature);
-    if (!isValid) {
-      console.error(`Invalid signature for nickname: ${nickname}`);
-      return res
-        .status(403)
-        .json({ success: false, message: "Invalid signature" });
-    }
-    res.status(200).json({ success: true, message: "The user exists" });
-  } catch (error) {
-    console.error("Error verifying user:", {
-      nickname: nickname,
-      signature: signature,
-      errorMessage: error.message,
-      errorStack: error.stack,
-    });
-    res.status(500).json({ success: false, message: "Internal server error" });
-  }
-});
-
 /**
- * @api {post} /delete/ Delete User
+ * @api {post} /delete Delete User
  * @apiName DeleteUser
  * @apiGroup User
  * @apiVersion 1.0.0
@@ -319,7 +271,7 @@ router.post("/verify", async (req, res) => {
  *       "message": "Error during delete user"
  *     }
  */
-router.post("/delete/", verifyUser, async (req, res, next) => {
+router.post("/delete", verifyUser, async (req, res, next) => {
   const { nickname, publicKey } = req.body;
   if (!nickname || !publicKey) {
     return res.status(400).json({
@@ -343,6 +295,74 @@ router.post("/delete/", verifyUser, async (req, res, next) => {
     });
   } catch (error) {
     console.error("Error during delete user:", error);
+    next(error);
+  }
+});
+
+/**
+ * @api {post} /publickey Get User Public Key
+ * @apiName GetUserPublicKey
+ * @apiGroup User
+ * @apiDescription This endpoint is used to retrieve the public key of a user by their nickname.
+ *
+ * @apiParam {String} nickname The nickname of the user whose public key is to be retrieved (required by verifyUser middleware).
+ * @apiParam {String} signature The signature to be verified, encoded in base64 (required by verifyUser middleware).
+ *
+ * @apiSuccess {Boolean} success True if the public key was successfully retrieved.
+ * @apiSuccess {String} message A message indicating the result of the operation.
+ * @apiSuccess {String} publicKey The public key of the user.
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *     {
+ *       "success": true,
+ *       "message": "Public key retrieved successfully",
+ *       "publicKey": "MIIBIjANBgkqhkiG..."
+ *     }
+ *
+ * @apiError {Boolean} success False if the public key could not be retrieved or an error occurred.
+ * @apiError {String} message A message indicating the error.
+ * @apiErrorExample Error-Response (User Not Found):
+ *     HTTP/1.1 404 Not Found
+ *     {
+ *       "success": false,
+ *       "message": "User not found"
+ *     }
+ * @apiErrorExample Error-Response (Invalid Signature):
+ *     HTTP/1.1 403 Forbidden
+ *     {
+ *       "success": false,
+ *       "message": "Invalid signature"
+ *     }
+ * @apiErrorExample Error-Response (Internal Server Error):
+ *     HTTP/1.1 500 Internal Server Error
+ *     {
+ *       "success": false,
+ *       "message": "Error during retrieving public key"
+ *     }
+ */
+router.post("/publickey", verifyUser, async (req, res, next) => {
+  const { targetNickname } = req.body;
+  if (!targetNickname) {
+    return res.status(400).json({
+      success: false,
+      message: "Nickname is required.",
+    });
+  }
+
+  try {
+    const user = await User.findOne({ nickname: targetNickname });
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+    res.status(200).json({
+      success: true,
+      message: "Public key retrieved successfully",
+      publicKey: user.publicKey,
+    });
+  } catch (error) {
+    console.error("Error during retrieving public key:", error);
     next(error);
   }
 });
