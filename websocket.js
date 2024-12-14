@@ -188,7 +188,7 @@ module.exports = function (server) {
     // 处理用户错过的消息
     if (events.has(socket.username)) {
       const missedEvent = events.get(socket.username);
-      missedEvent.map((e) => {
+      missedEvent.map((e, i) => {
         const {eventName, toMessage, sender} = e;
         switch (eventName) {
           case 'message':
@@ -213,6 +213,7 @@ module.exports = function (server) {
             })
             break;
         }
+        missedEvent.splice(i, 1);
       });
     }
 
