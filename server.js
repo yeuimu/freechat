@@ -28,12 +28,12 @@ app.use(errorRoutes);
 
 // 启动 WebSocket 服务器
 const server = http.createServer(app);
-require('./websocket')(server);
+require('./socket')(server);
 
 // 启动服务器
 const HTTP_PORT = process.env.HTTP_PORT || 3000;
 server.listen(HTTP_PORT, () => {
-  console.log(`API Server running on port ${HTTP_PORT}`);
+  console.log("API服务器运行成功");
 });
 
 // 定时任务

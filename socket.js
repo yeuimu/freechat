@@ -6,7 +6,6 @@ const Group = require("./models/Group");
 const { createLogger, format, transports } = require("winston");
 
 const connections = new Map(); // { username: socket }
-const missedMessages = []; // { username: message }
 const events = new Map(); // nicknam => [{eventName, data, sender}]
 
 // 错误码枚举
@@ -162,6 +161,8 @@ module.exports = function (server) {
       credentials: true, // 允许凭据
     },
   });
+
+  console.log("Socket.IO启动成功");
 
   // 中间件进行身份验证
   io.use(async (socket, next) => {
