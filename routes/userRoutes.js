@@ -165,7 +165,8 @@ router.post("/refresh", verifyUser, async (req, res, next) => {
  *       "results": [
  *         {
  *           "nickname": "desiredNickname",
- *           "publicKey": "publicKeyString"
+ *           "publicKey": "publicKeyString",
+ *           "type": "private",
  *         }
  *       ]
  *     }
@@ -212,7 +213,7 @@ router.post("/search", verifyUser, async (req, res, next) => {
       return res.status(200).json({
         success: true,
         message: "Exists",
-        results: [{ nickname: user.nickname, publicKey: user.publicKey }],
+        results: [{ nickname: user.nickname, publicKey: user.publicKey, type: "private" }],
       });
     }
     return res
@@ -274,6 +275,7 @@ router.post("/search", verifyUser, async (req, res, next) => {
 router.post("/delete", verifyUser, async (req, res, next) => {
   const { nickname, publicKey } = req.body;
   if (!nickname || !publicKey) {
+    console.log(nickname)
     return res.status(400).json({
       success: false,
       message: "Nickname and publicKey are required.",
