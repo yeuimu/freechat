@@ -8,9 +8,9 @@ const messageRoutes = require('./routes/messegeRoutes');
 const groupRoutes = require('./routes/groupRoutes');
 const errorRoutes = require('./routes/errorRoutes');
 
-
 // 连接数据库
 require('./config/db')();
+require('./config/redis').startRedis();
 
 const app = express();
 
