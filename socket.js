@@ -4,6 +4,7 @@ const Message = require("./models/Message");
 const User = require("./models/User");
 const Group = require("./models/Group");
 const { createLogger, format, transports } = require("winston");
+const { delKey, pushEletList, getList, exitsKey, getKey } = require("./config/redis")
 
 const connections = new Map(); // { username: socket }
 const events = new Map(); // nicknam => [{eventName, data, sender}]
@@ -144,15 +145,6 @@ const deliverMessage = async (
   return toMessage;
 };
 
-// 添加没有处理的事件
-const addEvent = (username, data) => {
-  if (events.has(username)) {
-    events.get(username).push(data);
-  } else {
-    events.set(username, [data]);
-  }
-}
-
 module.exports = function (server) {
   const io = new Server(server, {
     cors: {
@@ -187,9 +179,9 @@ module.exports = function (server) {
     );
 
     // 处理用户错过的消息
-    if (events.has(socket.username)) {
-      const missedEvent = events.get(socket.username);
-      missedEvent.map((e, i) => {
+    const missedMessages = await getList(socket.username);
+    if (missedMessages) {
+      missedMessages.map(async (e, i) => {
         const {eventName, toMessage, sender} = e;
         switch (eventName) {
           case 'message':
@@ -203,7 +195,7 @@ module.exports = function (server) {
               const recipientSocket = connections.get(sender);
               recipientSocket.emit('respond', data);
             } else {
-              addEvent(sender, data);
+              pushEletList(sender, data);
             }
             break;
           case 'respond':
@@ -214,7 +206,7 @@ module.exports = function (server) {
             })
             break;
         }
-        missedEvent.splice(i, 1);
+        await delKey(socket.username);
       });
     }
 
@@ -268,7 +260,7 @@ module.exports = function (server) {
             create,
           };
           const data = {eventName: "message", toMessage, sender: socket.username};
-          addEvent(recipient, data);
+          pushEletList(recipient, data);
           socket.emit("respond", {
             code: Responds.MsgMissedOffline.code,
             message: Responds.MsgMissedOffline.message,

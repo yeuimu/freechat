@@ -1,11 +1,11 @@
 const { createClient } = require("redis");
 
-let client;
+let redis;
 
 const startRedis = async () => {
-  if (client) return;
+  if (redis) return;
 
-  client = await createClient({
+  redis = await createClient({
     socket: {
       port: process.env.REDIS_PORT,
       host: process.env.REDIS_HOST,
@@ -17,42 +17,56 @@ const startRedis = async () => {
 };
 
 const setKey = async (key, value, ttl = null) => {
-  if (!client) await startRedis();
+  if (!redis) await startRedis();
   value = JSON.stringify(value);
-  await client.set(key, value);
+  await redis.set(key, value);
 
   if (ttl !== null) {
-    await client.expire(key, ttl);
+    await redis.expire(key, ttl);
   }
 };
 
 const pushEletList = async (list, value) => {
   try {
-    if (!client) await startRedis();
+    if (!redis) await startRedis();
     value = JSON.stringify(value);
-    await client.rpush(list, value);
+    await redis.rPush(list, value);
   } catch (error) {
     console.error(error);
   }
 };
 
 const getList = async (list) => {
+  console.log("getList1")
   try {
-    if (!client) await startRedis();
-    list = await client.lrange(list, 0, -1);
-    return list ? JSON.parse(list) : null;
-  } catch (error) {}
+    if (!redis) await startRedis();
+    console.log("getList2")
+    list = await redis.lRange(list, 0, -1);
+    console.log("getList3")
+    return list ? list.map((e) => JSON.parse(e)) : null;
+  } catch (error) {
+    console.log(error)
+  }
 };
 
 const getKey = async (key) => {
-  if (!client) await startRedis();
-  const value = await client.get(key);
+  if (!redis) await startRedis();
+  const value = await redis.get(key);
   return value ? JSON.parse(value) : null;
 };
 
 const delKey = async (key) => {
-  if (!client) await startRedis();
-  await client.del(key);
+  if (!redis) await startRedis();
+  await redis.del(key);
 };
 
-module.exports = { startRedis, setKey, getKey, delKey, pushEletList, getList };
+const exitsKey = async (key) => {
+  try {
+    if (!redis) await startRedis();
+    await redis.exists(key);
+  } catch (error) {
+    console.log(error)
+  }
+};
+
+module.exports = { startRedis, setKey, getKey, delKey, pushEletList, getList, exitsKey };
