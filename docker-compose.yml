@@ -1,6 +1,6 @@
 services:
   nginx:
-    image: nginx:latest
+    image: nginx:1.27.2
     container_name: nginx
     ports:
       - "80:80"
@@ -13,7 +13,7 @@ services:
       - app
 
   mongodb:
-    image: mongo:latest
+    image: mongo:8.0.3
     container_name: mongodb
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
@@ -44,7 +44,7 @@ services:
       - redis
 
   redis:
-    image: redis:latest
+    image: redis:7.4.1
     container_name: redis
     ports:
       - "6379:6379"
