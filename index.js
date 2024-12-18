@@ -28,7 +28,7 @@ app.use(errorRoutes);
 
 // 启动 WebSocket 服务器
 const server = http.createServer(app);
-require('./socket')(server);
+require('./socket/index').startSocket(server);
 
 // 启动服务器
 const HTTP_PORT = process.env.HTTP_PORT || 3000;

@@ -1,10 +1,10 @@
 const { Server } = require("socket.io");
 const crypto = require("crypto");
-const Message = require("./models/Message");
-const User = require("./models/User");
-const Group = require("./models/Group");
+const Message = require("../models/Message");
+const User = require("../models/User");
+const Group = require("../models/Group");
 const { createLogger, format, transports } = require("winston");
-const { delKey, pushEletList, getList, exitsKey, getKey } = require("./config/redis")
+const { delKey, pushEletList, getList, exitsKey, getKey } = require("../config/redis")
 
 const connections = new Map(); // { username: socket }
 const events = new Map(); // nicknam => [{eventName, data, sender}]
@@ -145,8 +145,11 @@ const deliverMessage = async (
   return toMessage;
 };
 
-module.exports = function (server) {
-  const io = new Server(server, {
+let io;
+
+// 启动函数
+const startSocket = (server) => {
+  io = new Server(server, {
     cors: {
       origin: "*", // 允许所有源
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // 允许的HTTP方法
@@ -307,4 +310,6 @@ module.exports = function (server) {
     .catch((error) => {
       logger.error("Error initializing group rooms", { error: error.message });
     });
-};
+}
+
+module.exports = { startSocket, io };
