@@ -4,10 +4,15 @@ const Message = require("../models/Message");
 const User = require("../models/User");
 const Group = require("../models/Group");
 const { createLogger, format, transports } = require("winston");
-const { delKey, pushEletList, getList, exitsKey, getKey } = require("../config/redis")
+const {
+  delKey,
+  pushEletList,
+  getList,
+  exitsKey,
+  getKey,
+} = require("../config/redis");
 
 const connections = new Map(); // { username: socket }
-const events = new Map(); // nicknam => [{eventName, data, sender}]
 
 // 错误码枚举
 const Errors = {
@@ -145,171 +150,178 @@ const deliverMessage = async (
   return toMessage;
 };
 
-let io;
+const io = new Server({
+  cors: {
+    origin: "*", // 允许所有源
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // 允许的HTTP方法
+    credentials: true, // 允许凭据
+  },
+});
 
-// 启动函数
-const startSocket = (server) => {
-  io = new Server(server, {
-    cors: {
-      origin: "*", // 允许所有源
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // 允许的HTTP方法
-      credentials: true, // 允许凭据
-    },
-  });
-
-  console.log("Socket.IO启动成功");
-
-  // 中间件进行身份验证
-  io.use(async (socket, next) => {
-    const { username, signature } = socket.handshake.auth;
-    try {
-      const isValid = await verifySignature(username, signature);
-      if (!isValid) {
-        logger.error(`${username}' signature is valid!`);
-        return next(new Error(Errors.AUTHENTICATION_ERROR.message));
-      }
-      socket.username = username;
-      connections.set(username, socket);
-      next();
-    } catch (error) {
-      next(new Error(Errors.AUTHENTICATION_ERROR.message));
+// 中间件进行身份验证
+io.use(async (socket, next) => {
+  const { username, signature } = socket.handshake.auth;
+  try {
+    const isValid = await verifySignature(username, signature);
+    if (!isValid) {
+      logger.error(`${username}' signature is valid!`);
+      return next(new Error(Errors.AUTHENTICATION_ERROR.message));
     }
-  });
+    socket.username = username;
+    connections.set(username, socket);
+    next();
+  } catch (error) {
+    next(new Error(Errors.AUTHENTICATION_ERROR.message));
+  }
+});
 
-  io.on("connection", async (socket) => {
-    logger.info(
-      `User ${socket.username} connected with ${socket.conn.transport.name} protocol`
-    );
+io.on("connection", async (socket) => {
+  logger.info(
+    `User ${socket.username} connected with ${socket.conn.transport.name} protocol`
+  );
 
-    // 处理用户错过的消息
-    const missedMessages = await getList(socket.username);
-    if (missedMessages) {
-      missedMessages.map(async (e, i) => {
-        const {eventName, toMessage, sender} = e;
-        switch (eventName) {
-          case 'message':
-            socket.emit(eventName, toMessage);
-            const data = {
-              code: Responds.MsgDeliveredSuccessfully.code,
-              message: Responds.MsgDeliveredSuccessfully.message,
-              toMessage,
-            };
-            if (connections.has(sender)) {
-              const recipientSocket = connections.get(sender);
-              recipientSocket.emit('respond', data);
-            } else {
-              pushEletList(sender, data);
-            }
-            break;
-          case 'respond':
-            socket.emit('respond', {
-              code: Responds.MsgDeliveredSuccessfully.code,
-              message: Responds.MsgDeliveredSuccessfully.message,
-              toMessage,
-            })
-            break;
-        }
-        await delKey(socket.username);
-      });
-    }
+  console.log(
+    `User ${socket.username} connected with ${socket.conn.transport.name} protocol`
+  );
 
-    // 用户更新到websocket
-    socket.conn.on("upgrade", (transport) => {
-      logger.info(
-        `User ${socket.username} connection upgraded to ${transport.name}`
-      );
-    });
-
-    // 处理用户私聊和群聊
-    socket.on("message", async (data) => {
-      try {
-        const { type, recipient, content, create } = data;
-
-        // type 是否正确
-        if (!["private", "group", "key"].includes(type)) {
-          socket.emit("error", {
-            code: Errors.INVALID_CHAT_TYPE.code,
-            message: Errors.INVALID_CHAT_TYPE.message,
-          });
-          logger.error(`${socket.username}'s chat type is invalid: ${type}`);
-          return;
-        }
-
-        const recipientSocket = connections.get(recipient);
-        // 对方在线
-        if (recipientSocket) {
-          const toMessage = await deliverMessage(recipientSocket, {
-            type,
-            sender: socket.username,
-            content: content,
-            create,
-          });
-          // 转达消息完成后,响应客户端
-          logger.info(
-            `Message from ${socket.username} to ${recipientSocket.username}: ${content}`
-          );
+  // 处理用户错过的消息
+  const missedMessages = await getList(socket.username);
+  if (missedMessages) {
+    missedMessages.map(async (e, i) => {
+      const { eventName, toMessage, sender } = e;
+      switch (eventName) {
+        case "message":
+          socket.emit(eventName, toMessage);
+          const data = {
+            code: Responds.MsgDeliveredSuccessfully.code,
+            message: Responds.MsgDeliveredSuccessfully.message,
+            toMessage,
+          };
+          if (connections.has(sender)) {
+            const recipientSocket = connections.get(sender);
+            recipientSocket.emit("respond", data);
+          } else {
+            pushEletList(sender, data);
+          }
+          break;
+        case "respond":
           socket.emit("respond", {
             code: Responds.MsgDeliveredSuccessfully.code,
             message: Responds.MsgDeliveredSuccessfully.message,
             toMessage,
           });
-        }
-        // 对方不在线,把事件丢在 events 中, 等对方上线了再处理
-        else {
-          const toMessage = {
-            type,
-            sender: socket.username,
-            content,
-            create,
-          };
-          const data = {eventName: "message", toMessage, sender: socket.username};
-          pushEletList(recipient, data);
-          socket.emit("respond", {
-            code: Responds.MsgMissedOffline.code,
-            message: Responds.MsgMissedOffline.message,
-            toMessage,
-          });
-          logger.info(
-            `The message to be sent to ${recipient} from ${socket.username} is failed, then stored it at buffers for it be resent`
-          );
-          return;
-        }
-      } catch (error) {
-        logger.error("Error handling message", {
-          error: error.message,
-          userId: socket.username,
-          stack: error.stack,
-        });
-        socket.emit("error", { code: error.message, message: error.message });
+          break;
       }
+      await delKey(socket.username);
     });
+  }
 
-    // 用户断开连接
-    socket.on("disconnect", () => {
-      logger.info(`${socket.username} disconnected`);
-      connections.delete(socket.username);
-    });
-
-    // 处理用户加入群聊
-    socket.on("join", (groupId) => {
-      socket.join(groupId);
-      logger.info(`User ${socket.username} joined group ${groupId}`, {
-        userId: socket.username,
-        groupId,
-      });
-    });
+  // 用户更新到websocket
+  socket.conn.on("upgrade", (transport) => {
+    logger.info(
+      `User ${socket.username} connection upgraded to ${transport.name}`
+    );
   });
 
-  // 初始化时为每个群组创建房间
-  Group.find()
-    .then((groups) => {
-      groups.forEach((group) => {
-        io.of("/").adapter.rooms[group._id] = new Set();
+  // 处理用户私聊和群聊
+  socket.on("message", async (data) => {
+    try {
+      const { type, recipient, content, create } = data;
+
+      // type 是否正确
+      if (!["private", "group", "key"].includes(type)) {
+        socket.emit("error", {
+          code: Errors.INVALID_CHAT_TYPE.code,
+          message: Errors.INVALID_CHAT_TYPE.message,
+        });
+        logger.error(`${socket.username}'s chat type is invalid: ${type}`);
+        return;
+      }
+
+      const recipientSocket = connections.get(recipient);
+      // 对方在线
+      if (recipientSocket) {
+        const toMessage = await deliverMessage(recipientSocket, {
+          type,
+          sender: socket.username,
+          content: content,
+          create,
+        });
+        // 转达消息完成后,响应客户端
+        logger.info(
+          `Message from ${socket.username} to ${recipientSocket.username}: ${content}`
+        );
+        socket.emit("respond", {
+          code: Responds.MsgDeliveredSuccessfully.code,
+          message: Responds.MsgDeliveredSuccessfully.message,
+          toMessage,
+        });
+      }
+      // 对方不在线,把事件丢在 events 中, 等对方上线了再处理
+      else {
+        const toMessage = {
+          type,
+          sender: socket.username,
+          content,
+          create,
+        };
+        const data = {
+          eventName: "message",
+          toMessage,
+          sender: socket.username,
+        };
+        pushEletList(recipient, data);
+        socket.emit("respond", {
+          code: Responds.MsgMissedOffline.code,
+          message: Responds.MsgMissedOffline.message,
+          toMessage,
+        });
+        logger.info(
+          `The message to be sent to ${recipient} from ${socket.username} is failed, then stored it at buffers for it be resent`
+        );
+        return;
+      }
+    } catch (error) {
+      logger.error("Error handling message", {
+        error: error.message,
+        userId: socket.username,
+        stack: error.stack,
       });
-    })
-    .catch((error) => {
-      logger.error("Error initializing group rooms", { error: error.message });
+      socket.emit("error", { code: error.message, message: error.message });
+    }
+  });
+
+  // 用户断开连接
+  socket.on("disconnect", () => {
+    logger.info(`${socket.username} disconnected`);
+    connections.delete(socket.username);
+  });
+
+  // 处理用户加入群聊
+  socket.on("join", (groupId) => {
+    socket.join(groupId);
+    logger.info(`User ${socket.username} joined group ${groupId}`, {
+      userId: socket.username,
+      groupId,
     });
-}
+  });
+});
+
+// 初始化时为每个群组创建房间
+Group.find()
+  .then((groups) => {
+    groups.forEach((group) => {
+      io.of("/").adapter.rooms[group._id] = new Set();
+    });
+  })
+  .catch((error) => {
+    logger.error("Error initializing group rooms", { error: error.message });
+  });
+
+// 启动函数
+const startSocket = (server) => {
+  io.attach(server);
+  console.log("Socket.IO启动成功");
+};
 
 module.exports = { startSocket, io };
