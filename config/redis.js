@@ -63,7 +63,7 @@ const delKey = async (key) => {
 const exitsKey = async (key) => {
   try {
     if (!redis) await startRedis();
-    await redis.exists(key);
+    return Boolean(await redis.exists(key));
   } catch (error) {
     console.log(error)
   }
