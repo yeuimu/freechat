@@ -48,6 +48,10 @@ const Responds = {
     code: 2,
     message: "Message delivered successfully",
   },
+  RecipientAccountDeleted: {
+    code: 3,
+    message: "Recipient account has been deleted",
+  },
 };
 
 // 使用更强大的日志系统
@@ -187,29 +191,29 @@ io.on("connection", async (socket) => {
   // 处理用户错过的消息
   const missedMessages = await getList(socket.username);
   if (missedMessages) {
-    missedMessages.map(async (e, i) => {
-      const { eventName, toMessage, sender } = e;
+    missedMessages.map(async (data, i) => {
+      const { eventName, toMessage, sender } = data;
       switch (eventName) {
         case "message":
           socket.emit(eventName, toMessage);
-          const data = {
+          const respondRes = {
             code: Responds.MsgDeliveredSuccessfully.code,
             message: Responds.MsgDeliveredSuccessfully.message,
             toMessage,
           };
           if (connections.has(sender)) {
             const recipientSocket = connections.get(sender);
-            recipientSocket.emit("respond", data);
+            recipientSocket.emit("respond", respondRes);
           } else {
-            pushEletList(sender, data);
+            pushEletList(sender, {
+              eventName: "respond",
+              toMessage: respondRes,
+              sender: sender,
+            });
           }
           break;
         case "respond":
-          socket.emit("respond", {
-            code: Responds.MsgDeliveredSuccessfully.code,
-            message: Responds.MsgDeliveredSuccessfully.message,
-            toMessage,
-          });
+          socket.emit("respond", toMessage);
           break;
       }
       await delKey(socket.username);
@@ -235,6 +239,21 @@ io.on("connection", async (socket) => {
           message: Errors.INVALID_CHAT_TYPE.message,
         });
         logger.error(`${socket.username}'s chat type is invalid: ${type}`);
+        return;
+      }
+
+      const user = await User.findOne({ recipient });
+      if (!user) {
+        socket.emit("respond", {
+          code: Responds.RecipientAccountDeleted.code,
+          message: Responds.RecipientAccountDeleted.message,
+          toMessage: {
+            type,
+            sender: socket.username,
+            content,
+            create,
+          },
+        });
         return;
       }
 
@@ -324,4 +343,4 @@ const startSocket = (server) => {
   console.log("Socket.IO启动成功");
 };
 
-module.exports = { startSocket, io };
+module.exports = { startSocket, io, Responds };
