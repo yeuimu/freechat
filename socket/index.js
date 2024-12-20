@@ -191,15 +191,18 @@ io.on("connection", async (socket) => {
   // 处理用户错过的消息
   const missedMessages = await getList(socket.username);
   if (missedMessages) {
-    missedMessages.map(async (data, i) => {
-      const { eventName, toMessage, sender } = data;
+    missedMessages.map(async (event, i) => {
+      const { eventName, data: toMessage, sender } = event;
       switch (eventName) {
         case "message":
           socket.emit(eventName, toMessage);
           const respondRes = {
             code: Responds.MsgDeliveredSuccessfully.code,
             message: Responds.MsgDeliveredSuccessfully.message,
-            toMessage,
+            info: {
+              recipient: socket.username,
+              create: toMessage.create,
+            },
           };
           if (connections.has(sender)) {
             const recipientSocket = connections.get(sender);
@@ -207,13 +210,13 @@ io.on("connection", async (socket) => {
           } else {
             pushEletList(sender, {
               eventName: "respond",
-              toMessage: respondRes,
+              data: respondRes,
               sender: sender,
             });
           }
           break;
         case "respond":
-          socket.emit("respond", toMessage);
+          socket.emit("respond", data);
           break;
       }
       await delKey(socket.username);
@@ -284,12 +287,12 @@ io.on("connection", async (socket) => {
           content,
           create,
         };
-        const data = {
+        const event = {
           eventName: "message",
-          toMessage,
+          data: toMessage,
           sender: socket.username,
         };
-        pushEletList(recipient, data);
+        pushEletList(recipient, event);
         socket.emit("respond", {
           code: Responds.MsgMissedOffline.code,
           message: Responds.MsgMissedOffline.message,
