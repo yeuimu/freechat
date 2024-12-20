@@ -287,17 +287,21 @@ io.on("connection", async (socket) => {
           content,
           create,
         };
+        const respondRes = {
+          code: Responds.MsgMissedOffline.code,
+          message: Responds.MsgMissedOffline.message,
+          info: {
+            recipient: recipient,
+            create: toMessage.create,
+          },
+        }
         const event = {
           eventName: "message",
-          data: toMessage,
+          data: respondRes,
           sender: socket.username,
         };
         pushEletList(recipient, event);
-        socket.emit("respond", {
-          code: Responds.MsgMissedOffline.code,
-          message: Responds.MsgMissedOffline.message,
-          toMessage,
-        });
+        socket.emit("respond", respondRes);
         logger.info(
           `The message to be sent to ${recipient} from ${socket.username} is failed, then stored it at buffers for it be resent`
         );
